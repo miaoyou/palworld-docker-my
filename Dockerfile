@@ -4,22 +4,30 @@ ARG DEBIAN_FRONTEND=noninteractive
 WORKDIR /opt/palworld
 
 # ============================================
-# 在构建时下载 Palworld 服务端（关键改动）
-# 这样镜像本身就包含最新游戏文件
+# 使用重试逻辑下载 Palworld 服务端
 # ============================================
-RUN /home/steam/steamcmd/steamcmd.sh +force_install_dir "/opt/palworld" +login anonymous +app_update 2394010 validate +quit
+# 第一步：初始化 SteamCMD
+RUN /home/steam/steamcmd/steamcmd.sh +login anonymous +quit
 
-# 记录版本号到文件（方便启动时显示）
-RUN if [ -f /opt/palworld/version.txt ]; then \
-        echo "Built with version: $(cat /opt/palworld/version.txt 2>/dev/null || echo 'unknown')"; \
-    else \
-        echo "Built version: $(date +%Y%m%d)" > /opt/palworld/version.txt; \
+# 第二步：带重试的下载（最多尝试3次）
+RUN for i in 1 2 3; do \
+        echo "Attempt $i to download Palworld server..." && \
+        /home/steam/steamcmd/steamcmd.sh +force_install_dir "/opt/palworld" +login anonymous +app_update 2394010 validate +quit && \
+        echo "Download completed successfully!" && \
+        break; \
+    done && \
+    if [ ! -f /opt/palworld/PalServer-Linux-Shipping ]; then \
+        echo "ERROR: Palworld server files not found after multiple attempts!"; \
+        exit 1; \
     fi
 
+# 记录构建时间
+RUN echo "Built on: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" > /opt/palworld/version.txt
+
 # ============================================
-# 环境变量（保留原样，但 FORCE_UPDATE 不再需要）
+# 环境变量（保留原有配置）
 # ============================================
-# Container lifecycle（不再需要 FORCE_UPDATE，因为镜像已包含最新文件）
+# Container lifecycle
 ENV FORCE_UPDATE=false
 
 # PalServer startup
@@ -59,9 +67,7 @@ ENV SERVER_REPLICATE_PAWN_CULL_DISTANCE=
 # Backups
 ENV ENABLE_BACKUP_SAVE_DATA=
 
-# ============================================
-# 复制启动脚本并设置权限
-# ============================================
+# 复制启动脚本
 ADD docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
@@ -70,7 +76,6 @@ EXPOSE ${GAME_PORT}/udp ${RCON_PORT}/tcp ${RESTAPI_PORT}/tcp
 # 创建存档和MOD目录
 RUN mkdir -p /opt/palworld/Pal/Saved
 RUN mkdir -p /opt/palworld/Pal/Content/Paks/MOD
-
 VOLUME [ "/opt/palworld/Pal/Saved", "/opt/palworld/Pal/Content/Paks/MOD" ]
 
 ENTRYPOINT [ "/docker-entrypoint.sh" ]
