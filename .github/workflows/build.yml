@@ -1,14 +1,25 @@
 name: Build Docker Image
 
 on:
+  # 在 main 分支有推送时触发（比如你修改了Dockerfile）
   push:
+    branches:
+      - main
     tags:
       - "*"
+  # 允许手动在Actions页面点击运行
+  workflow_dispatch:
+  # 定时触发：每天UTC 4:00（北京时间中午12点）自动检查更新
+  schedule:
+    - cron: '0 4 * * *'
 
 jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -22,12 +33,21 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: miaoyou/palworld
+          # 改成你自己的 Docker Hub 用户名
+          images: ${{ secrets.DOCKER_HUB_USERNAME }}/palworld
+          # 生成多个标签：latest 和 日期（方便回滚）
+          tags: |
+            type=raw,value=latest
+            type=raw,value={{date 'YYYYMMDD'}}
 
       - name: Build and push
         id: docker_build
         uses: docker/build-push-action@v7
         with:
+          context: .
+          file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
