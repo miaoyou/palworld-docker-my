@@ -1,141 +1,138 @@
 #!/bin/bash
-set -e
 
-settings_file=/opt/palworld/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini
+# ============================================
+# 设置默认值
+# ============================================
+GAME_PORT=${GAME_PORT:-8211}
+MAX_PLAYERS=${MAX_PLAYERS:-32}
+LOG_FORMAT=${LOG_FORMAT:-text}
+IS_PUBLIC=${IS_PUBLIC:-false}
+ENABLE_MULTITHREAD=${ENABLE_MULTITHREAD:-false}
+RCON_ENABLED=${RCON_ENABLED:-false}
+RCON_PORT=${RCON_PORT:-25575}
+RESTAPI_ENABLED=${RESTAPI_ENABLED:-false}
+RESTAPI_PORT=${RESTAPI_PORT:-8212}
 
-escape_sed_replacement() {
-    printf '%s' "$1" | sed 's/[\\&|]/\\&/g'
-}
+# ============================================
+# 打印启动信息
+# ============================================
+echo "=========================================="
+echo "Palworld Dedicated Server"
+echo "=========================================="
+echo "Game Port: $GAME_PORT"
+echo "Max Players: $MAX_PLAYERS"
+echo "Log Format: $LOG_FORMAT"
+echo "Public Server: $IS_PUBLIC"
+echo "Multithread: $ENABLE_MULTITHREAD"
+echo "RCON Enabled: $RCON_ENABLED"
+echo "REST API Enabled: $RESTAPI_ENABLED"
+if [ -n "$SERVER_NAME" ]; then
+    echo "Server Name: $SERVER_NAME"
+fi
+if [ -n "$SERVER_PASSWORD" ]; then
+    echo "Server Password: [SET]"
+fi
+echo "=========================================="
 
-escape_ini_string() {
-    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
-}
+# ============================================
+# 切换到 Palworld 目录
+# ============================================
+cd /opt/palworld
 
-set_quoted_setting() {
-    local key=$1
-    local value
-    value=$(escape_ini_string "$2")
-    value=$(escape_sed_replacement "$value")
-    sed -i -E "s|([,(])${key}=\"[^\"]*\"|\\1${key}=\"${value}\"|" "$settings_file"
-}
-
-set_scalar_setting() {
-    local key=$1
-    local value
-    value=$(escape_sed_replacement "$2")
-    sed -i -E "s|([,(])${key}=[^,)]*|\\1${key}=${value}|" "$settings_file"
-}
-
-set_bool_setting() {
-    local key=$1
-    case $2 in
-        true) set_scalar_setting "$key" True ;;
-        false) set_scalar_setting "$key" False ;;
-        *) printf 'Invalid boolean value for %s: %s\n' "$key" "$2" >&2; exit 1 ;;
-    esac
-}
-
-set_crossplay_platforms() {
-    local value
-    value=$(escape_sed_replacement "$1")
-    sed -i -E "s|([,(])CrossplayPlatforms=\([^)]*\)|\\1CrossplayPlatforms=(${value})|" "$settings_file"
-}
-
-main() {
-if [[ -n $FORCE_UPDATE ]] && [[ $FORCE_UPDATE == "true" ]]; then
-    /home/steam/steamcmd/steamcmd.sh +force_install_dir "/opt/palworld" +login anonymous +app_update 2394010 validate +quit
+if [ ! -f "./PalServer-Linux-Shipping" ]; then
+    echo "ERROR: PalServer-Linux-Shipping not found!"
+    echo "The server files may not be properly installed."
+    exit 1
 fi
 
-if [[ ! -f $settings_file ]]; then
-    mkdir -p /opt/palworld/Pal/Saved/Config/LinuxServer/
-    cp /opt/palworld/DefaultPalWorldSettings.ini "$settings_file"
-    if [[ -n $SERVER_NAME ]]; then
-        set_quoted_setting ServerName "$SERVER_NAME"
-    fi
-    if [[ -n $SERVER_DESC ]]; then
-        set_quoted_setting ServerDescription "$SERVER_DESC"
-    fi
-    if [[ -n $SERVER_PASSWORD ]]; then
-        set_quoted_setting ServerPassword "$SERVER_PASSWORD"
-    fi
-    if [[ -n $ADMIN_PASSWORD ]]; then
-        set_quoted_setting AdminPassword "$ADMIN_PASSWORD"
-    fi
-    if [[ -n $RCON_ENABLED ]]; then
-        set_bool_setting RCONEnabled "$RCON_ENABLED"
-    fi
-    if [[ -n $RCON_PORT ]]; then
-        set_scalar_setting RCONPort "$RCON_PORT"
-    fi
-    if [[ -n $RESTAPI_ENABLED ]]; then
-        set_bool_setting RESTAPIEnabled "$RESTAPI_ENABLED"
-    fi
-    if [[ -n $RESTAPI_PORT ]]; then
-        set_scalar_setting RESTAPIPort "$RESTAPI_PORT"
-    fi
-    if [[ -n $CROSSPLAY_PLATFORMS ]]; then
-        set_crossplay_platforms "$CROSSPLAY_PLATFORMS"
-    fi
-    if [[ -n $BASE_CAMP_MAX_NUM ]]; then
-        set_scalar_setting BaseCampMaxNum "$BASE_CAMP_MAX_NUM"
-    fi
-    if [[ -n $BASE_CAMP_MAX_NUM_IN_GUILD ]]; then
-        set_scalar_setting BaseCampMaxNumInGuild "$BASE_CAMP_MAX_NUM_IN_GUILD"
-    fi
-    if [[ -n $BASE_CAMP_WORKER_MAX_NUM ]]; then
-        set_scalar_setting BaseCampWorkerMaxNum "$BASE_CAMP_WORKER_MAX_NUM"
-    fi
-    if [[ -n $ITEM_CONTAINER_FORCE_MARK_DIRTY_INTERVAL ]]; then
-        set_scalar_setting ItemContainerForceMarkDirtyInterval "$ITEM_CONTAINER_FORCE_MARK_DIRTY_INTERVAL"
-    fi
-    if [[ -n $MAX_BUILDING_LIMIT_NUM ]]; then
-        set_scalar_setting MaxBuildingLimitNum "$MAX_BUILDING_LIMIT_NUM"
-    fi
-    if [[ -n $PHYSICS_ACTIVE_DROP_ITEM_MAX_NUM ]]; then
-        set_scalar_setting PhysicsActiveDropItemMaxNum "$PHYSICS_ACTIVE_DROP_ITEM_MAX_NUM"
-    fi
-    if [[ -n $SERVER_REPLICATE_PAWN_CULL_DISTANCE ]]; then
-        set_scalar_setting ServerReplicatePawnCullDistance "$SERVER_REPLICATE_PAWN_CULL_DISTANCE"
-    fi
-    if [[ -n $ENABLE_BACKUP_SAVE_DATA ]]; then
-        set_bool_setting bIsUseBackupSaveData "$ENABLE_BACKUP_SAVE_DATA"
-    fi
+# ============================================
+# 构建启动参数
+# ============================================
+START_ARGS="-port=$GAME_PORT"
+START_ARGS="$START_ARGS -players=$MAX_PLAYERS"
+START_ARGS="$START_ARGS -logformat=$LOG_FORMAT"
+
+# 是否公开服务器
+if [ "$IS_PUBLIC" = "true" ]; then
+    START_ARGS="$START_ARGS -publiclobby"
 fi
 
-server_opts=(
-    "-port=$GAME_PORT"
-    "-players=$MAX_PLAYERS"
-)
-if [[ -n $ENABLE_MULTITHREAD ]] && [[ $ENABLE_MULTITHREAD == "true" ]]; then
-    server_opts+=(
-        -useperfthreads
-        -NoAsyncLoadingThread
-        -UseMultithreadForDS
-    )
-    if [[ -n $WORKER_THREADS ]]; then
-        server_opts+=("-NumberOfWorkerThreadsServer=$WORKER_THREADS")
-    fi
-fi
-if [[ -n $LOG_FORMAT ]]; then
-    server_opts+=("-logformat=$LOG_FORMAT")
-fi
-if [[ -n $IS_PUBLIC ]] && [[ $IS_PUBLIC == "true" ]]; then
-    server_opts+=(-publiclobby)
-    if [[ -n $PUBLIC_IP ]]; then
-        server_opts+=("-publicip=$PUBLIC_IP")
-    fi
-    if [[ -n $PUBLIC_PORT ]]; then
-        server_opts+=("-publicport=$PUBLIC_PORT")
-    fi
+# 公开 IP（仅当 IS_PUBLIC=true 时生效）
+if [ -n "$PUBLIC_IP" ] && [ "$IS_PUBLIC" = "true" ]; then
+    START_ARGS="$START_ARGS -publicip=$PUBLIC_IP"
 fi
 
-if [ $# -eq 0 ]; then
-    exec /opt/palworld/PalServer.sh "${server_opts[@]}"
-else
-    exec "$@"
+# 公开端口（仅当 IS_PUBLIC=true 时生效）
+if [ -n "$PUBLIC_PORT" ] && [ "$IS_PUBLIC" = "true" ]; then
+    START_ARGS="$START_ARGS -publicport=$PUBLIC_PORT"
 fi
-}
 
-if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
-    main "$@"
+# 服务器名称
+if [ -n "$SERVER_NAME" ]; then
+    START_ARGS="$START_ARGS -servername=\"$SERVER_NAME\""
 fi
+
+# 服务器描述
+if [ -n "$SERVER_DESC" ]; then
+    START_ARGS="$START_ARGS -serverdesc=\"$SERVER_DESC\""
+fi
+
+# 服务器密码
+if [ -n "$SERVER_PASSWORD" ]; then
+    START_ARGS="$START_ARGS -serverpassword=\"$SERVER_PASSWORD\""
+fi
+
+# 管理员密码
+if [ -n "$ADMIN_PASSWORD" ] && [ "$ADMIN_PASSWORD" != "changeme" ]; then
+    START_ARGS="$START_ARGS -adminpassword=\"$ADMIN_PASSWORD\""
+fi
+
+# 多线程优化
+if [ "$ENABLE_MULTITHREAD" = "true" ]; then
+    START_ARGS="$START_ARGS -useperfthreads -NoAsyncLoadingThread -UseMultithreadForDS"
+fi
+
+# Worker 线程数
+if [ -n "$WORKER_THREADS" ]; then
+    START_ARGS="$START_ARGS -NumberOfWorkerThreadsServer=$WORKER_THREADS"
+fi
+
+# RCON
+if [ "$RCON_ENABLED" = "true" ]; then
+    START_ARGS="$START_ARGS -rcon -rconport=$RCON_PORT"
+fi
+
+# REST API
+if [ "$RESTAPI_ENABLED" = "true" ]; then
+    START_ARGS="$START_ARGS -restapienabled -restapiip=0.0.0.0 -restapiport=$RESTAPI_PORT"
+fi
+
+# 跨平台
+if [ -n "$CROSSPLAY_PLATFORMS" ]; then
+    START_ARGS="$START_ARGS -CrossplayPlatforms=$CROSSPLAY_PLATFORMS"
+fi
+
+# ============================================
+# 生成 PalWorldSettings.ini（如果不存在）
+# ============================================
+SETTINGS_DIR="/opt/palworld/Pal/Saved/Config/LinuxServer"
+SETTINGS_FILE="$SETTINGS_DIR/PalWorldSettings.ini"
+
+if [ ! -f "$SETTINGS_FILE" ]; then
+    echo "Generating PalWorldSettings.ini..."
+    mkdir -p "$SETTINGS_DIR"
+    
+    cat > "$SETTINGS_FILE" << EOF
+[/Script/Pal.PalGameWorldSettings]
+OptionSettings=(BaseCampMaxNum=${BASE_CAMP_MAX_NUM:-},BaseCampMaxNumInGuild=${BASE_CAMP_MAX_NUM_IN_GUILD:-4},BaseCampWorkerMaxNum=${BASE_CAMP_WORKER_MAX_NUM:-},ItemContainerForceMarkDirtyInterval=${ITEM_CONTAINER_FORCE_MARK_DIRTY_INTERVAL:-},MaxBuildingLimitNum=${MAX_BUILDING_LIMIT_NUM:-},PhysicsActiveDropItemMaxNum=${PHYSICS_ACTIVE_DROP_ITEM_MAX_NUM:-},ServerReplicatePawnCullDistance=${SERVER_REPLICATE_PAWN_CULL_DISTANCE:-},bIsUseBackupSaveData=${ENABLE_BACKUP_SAVE_DATA:-false})
+EOF
+    echo "PalWorldSettings.ini created."
+fi
+
+# ============================================
+# 启动服务器
+# ============================================
+echo "Starting Palworld server with args: $START_ARGS"
+echo "=========================================="
+
+exec ./PalServer-Linux-Shipping $START_ARGS
