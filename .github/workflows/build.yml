@@ -1,50 +1,33 @@
-name: Build and Push Docker Image
+name: Build Docker Image
 
 on:
-  # 当 currentversion 文件被更新时触发（即检测到新版本）
   push:
-    branches: [ "main" ]
-    paths:
-      - 'currentversion'
-  # 允许手动触发
-  workflow_dispatch:
+    tags:
+      - "*"
 
 jobs:
-  build-and-push:
+  docker:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+      - name: Login to DockerHub
+        uses: docker/login-action@v4
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 
-      - name: Extract version from currentversion file
-        id: version
-        run: |
-          VERSION=$(cat currentversion)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Extracted version: $VERSION"
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v6
         with:
-          context: .
+          images: miaoyou/palworld
+
+      - name: Build and push
+        id: docker_build
+        uses: docker/build-push-action@v7
+        with:
           push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/palworld:latest
-            ${{ secrets.DOCKER_USERNAME }}/palworld:${{ steps.version.outputs.version }}
-          labels: |
-            org.opencontainers.image.title=Palworld Server
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
