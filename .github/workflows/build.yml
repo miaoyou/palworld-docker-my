@@ -9,12 +9,73 @@ on:
       - "*"
   # 允许手动在Actions页面点击运行
   workflow_dispatch:
-  # 定时触发：每天UTC 4:00（北京时间中午12点）自动检查更新
+  # 定时触发：每2小时检查一次更新
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 */2 * * *'
 
 jobs:
+  # 第一步：检查是否有更新
+  check-update:
+    runs-on: ubuntu-latest
+    outputs:
+      need_build: ${{ steps.check.outputs.need_update }}
+      buildid: ${{ steps.get_buildid.outputs.latest_buildid }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 获取最新 Palworld buildid
+        id: get_buildid
+        run: |
+          # 从 Steam API 获取最新 buildid
+          LATEST_BUILDID=$(curl -s "https://api.steamcmd.net/v1/info/2394010" | jq -r '.data."2394010".depots.branches.public.buildid')
+          echo "latest_buildid=$LATEST_BUILDID" >> $GITHUB_OUTPUT
+          
+          # 读取上次保存的 buildid
+          if [ -f buildid.txt ]; then
+            OLD_BUILDID=$(cat buildid.txt)
+          else
+            OLD_BUILDID="0"
+          fi
+          echo "old_buildid=$OLD_BUILDID" >> $GITHUB_OUTPUT
+          
+          echo "📦 最新 buildid: $LATEST_BUILDID"
+          echo "📦 上次 buildid: $OLD_BUILDID"
+
+      - name: 判断是否需要构建
+        id: check
+        run: |
+          LATEST="${{ steps.get_buildid.outputs.latest_buildid }}"
+          OLD="${{ steps.get_buildid.outputs.old_buildid }}"
+          
+          # 如果是手动触发或 push 触发，强制构建
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] || [ "${{ github.event_name }}" == "push" ]; then
+            echo "need_update=true" >> $GITHUB_OUTPUT
+            echo "🔨 手动/push触发，强制构建"
+          elif [ "$LATEST" != "$OLD" ] && [ -n "$LATEST" ]; then
+            echo "need_update=true" >> $GITHUB_OUTPUT
+            echo "✅ 检测到新版本: $LATEST (旧版本: $OLD)"
+          else
+            echo "need_update=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ 无更新，当前版本: $LATEST"
+          fi
+
+      - name: 保存最新 buildid
+        if: steps.check.outputs.need_update == 'true'
+        run: |
+          echo "${{ steps.get_buildid.outputs.latest_buildid }}" > buildid.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add buildid.txt
+          git commit -m "自动更新Palworld至buildid：${{ steps.get_buildid.outputs.latest_buildid }}" || echo "无变更"
+          git push
+
+  # 第二步：构建镜像（只有需要更新时才执行）
   docker:
+    needs: check-update
+    if: needs.check-update.outputs.need_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -35,10 +96,11 @@ jobs:
         with:
           # 改成你自己的 Docker Hub 用户名
           images: ${{ secrets.DOCKER_HUB_USERNAME }}/palworld
-          # 生成多个标签：latest 和 日期（方便回滚）
+          # 生成多个标签：latest、日期、buildid（方便回滚）
           tags: |
             type=raw,value=latest
             type=raw,value={{date 'YYYYMMDD'}}
+            type=raw,value=${{ needs.check-update.outputs.buildid }}
 
       - name: Build and push
         id: docker_build
@@ -51,3 +113,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: 输出构建信息
+        run: |
+          echo "🎉 构建完成！"
+          echo "📌 镜像标签: ${{ steps.meta.outputs.tags }}"
+          echo "📦 Palworld buildid: ${{ needs.check-update.outputs.buildid }}"
